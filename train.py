@@ -1,12 +1,10 @@
 import argparse
 import collections
-
+import os
 import numpy as np
-
 import torch
 import torch.optim as optim
 from torchvision import transforms
-
 from retinanet import model
 from retinanet.dataloader import VOCDetection, collater, Resizer, AspectRatioBasedSampler, Augmenter, Normalizer
 from torch.utils.data import DataLoader
@@ -15,7 +13,7 @@ from retinanet import coco_eval
 from retinanet import csv_eval
 assert torch.__version__.split('.')[0] == '1'
 from tqdm.autonotebook import tqdm
-
+import shutil
 print('CUDA available: {}'.format(torch.cuda.is_available()))
 
 
@@ -33,6 +31,7 @@ def main(args=None):
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--log_path", type=str, default="tensorboard/")
+    parser.add_argument("--saved_path", type=str, default="trained_models")
     parser.add_argument("--test_interval", type=int, default=1, help="Number of epoches between testing phases")
     parser.add_argument("--es_min_delta", type=float, default=0.0,
                         help="Early stopping's parameter: minimum change loss to qualify as an improvement")
@@ -98,13 +97,23 @@ def main(args=None):
     else:
         retinanet = torch.nn.DataParallel(retinanet)
 
+    if os.path.isdir(opt.log_path):
+        shutil.rmtree(opt.log_path)
+    os.makedirs(opt.log_path)
+
+    if not os.path.isdir(opt.saved_path):
+        os.makedirs(opt.saved_path)
+
+
     retinanet.training = True
-    writer = SummaryWriter(opt.log_path+"regigraph_bs_"+str(opt.batch_size)+"_dataset_"+opt.dataset+"_epoch_"+str(epoch+1)+"_backbone_"+str(opt.depth))
+    writer = SummaryWriter(opt.log_path+"regigraph_bs_"+str(opt.batch_size)+"_dataset_"+opt.dataset+"_backbone_"+str(opt.depth))
     optimizer = optim.Adam(retinanet.parameters(), lr=1e-5)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
 
     loss_hist = collections.deque(maxlen=500)
+    best_loss = 1e5
+    best_epoch = 0
 
     retinanet.train()
     retinanet.module.freeze_bn()
@@ -186,12 +195,11 @@ def main(args=None):
 
             cls_loss = np.mean(loss_classification_ls)
             reg_loss = np.mean(loss_regression_ls)
-            loss = classification_loss + regression_loss
+            loss = cls_loss + reg_loss
 
             print(
                 'Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f}'.format(
-                    epoch + 1, opt.num_epochs, cls_loss, reg_loss,
-                    np.mean(loss)))
+                    epoch + 1, opt.num_epochs, cls_loss, reg_loss, np.mean(loss)))
             writer.add_scalar('Test/Total_loss', loss, epoch)
             writer.add_scalar('Test/Regression_loss', reg_loss, epoch)
             writer.add_scalar('Test/Classfication_loss (focal loss)', cls_loss, epoch)
@@ -201,7 +209,7 @@ def main(args=None):
                 best_epoch = epoch
                 mAP = csv_eval.evaluate(valid_dataset, retinanet)
                 print(mAP)
-                torch.save(model, os.path.join(opt.saved_path, "regigraph_bs_"+str(opt.batch_size)+"_dataset_"+opt.dataset+"_epoch_"+str(epoch+1)+"_backbone_"+str(opt.depth)+".pth"))
+                torch.save(retinanet.module, os.path.join(opt.saved_path, "regigraph_bs_"+str(opt.batch_size)+"_dataset_"+opt.dataset+"_epoch_"+str(epoch+1)+"_backbone_"+str(opt.depth)+".pth"))
 
             # Early stopping
             if epoch - best_epoch > opt.es_patience > 0:

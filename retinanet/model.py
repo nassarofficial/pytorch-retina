@@ -1,11 +1,11 @@
-import torch.nn as nn
-import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
 from retinanet.utils import BasicBlock, Bottleneck, BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
+import torch
+import torch.nn as nn
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -229,8 +229,8 @@ class ResNet(nn.Module):
                 layer.eval()
 
     def forward(self, inputs):
-
-        if self.training:
+        if len(inputs) == 2:
+            self.training = True
             img_batch, annotations = inputs
         else:
             img_batch = inputs
