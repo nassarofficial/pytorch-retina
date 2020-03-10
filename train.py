@@ -39,7 +39,6 @@ def main(args=None):
                         help="Early stopping's parameter: number of epochs with no improvement after which training will be stopped. Set to 0 to disable this technique.")
 
     opt = parser.parse_args(args)
-    num_gpus = 1
     if torch.cuda.is_available():
         num_gpus = torch.cuda.device_count()
         torch.cuda.manual_seed(123)
@@ -55,7 +54,7 @@ def main(args=None):
 
     # sampler = AspectRatioBasedSampler(train_dataset, batch_size=2, drop_last=False)
 
-    training_params = {"batch_size": opt.batch_size * num_gpus,
+    training_params = {"batch_size": opt.batch_size,
                    "shuffle": True,
                    "drop_last": True,
                    "collate_fn": collater,
@@ -216,14 +215,6 @@ def main(args=None):
                 print("Stop training at epoch {}. The lowest loss achieved is {}".format(epoch, loss))
                 break
     writer.close()
-
-
-    #     torch.save(retinanet.module, 'trained_models/{}_retinanet_{}.pt'.format(opt.dataset, epoch_num))
-
-    # retinanet.eval()
-
-    # torch.save(retinanet, 'trained_models/model_final.pt')
-
 
 if __name__ == '__main__':
     main()
