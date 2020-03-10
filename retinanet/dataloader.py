@@ -5,299 +5,165 @@ import torch
 import numpy as np
 import random
 import csv
-
+import os.path as osp
+import torch.utils.data as data
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from torch.utils.data.sampler import Sampler
 
 from pycocotools.coco import COCO
-
+import cv2
 import skimage.io
 import skimage.transform
 import skimage.color
 import skimage
-
+if sys.version_info[0] == 2:
+    import xml.etree.cElementTree as ET
+else:
+    import xml.etree.ElementTree as ET
+import pickle
 from PIL import Image
 
 
-class CocoDataset(Dataset):
-    """Coco dataset."""
 
-    def __init__(self, root_dir, set_name='train2017', transform=None):
+# note: if you used our download scripts, this should be right
+VOC_ROOT = osp.join('/home/toandm2', "data/VOCdevkit/")
+
+class VOCAnnotationTransform(object):
+    """Transforms a VOC annotation into a Tensor of bbox coords and label index
+    Initilized with a dictionary lookup of classnames to indexes
+    Arguments:
+        class_to_ind (dict, optional): dictionary lookup of classnames -> indexes
+            (default: alphabetic indexing of VOC's 20 classes)
+        keep_difficult (bool, optional): keep difficult instances or not
+            (default: False)
+        height (int): height
+        width (int): width
+    """
+
+    def __init__(self, dataset_name,class_to_ind=None, keep_difficult=False):
+        self.dataset_name = dataset_name
+        if self.dataset_name == 'Pasadena':
+            self.class_to_ind = {'tree':0}
+        elif self.dataset_name == 'mapillary':
+            self.class_to_ind = {'sign':0}
+
+        self.keep_difficult = keep_difficult
+
+    def __call__(self, target, width, height):
         """
-        Args:
-            root_dir (string): COCO directory.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
+        Arguments:
+            target (annotation) : the target annotation to be made usable
+                will be an ET.Element
+        Returns:
+            a list containing lists of bounding boxes  [bbox coords, class name]
         """
-        self.root_dir = root_dir
-        self.set_name = set_name
+        res = []
+        for obj in target.iter('object'):
+            difficult = int(obj.find('difficult').text) == 1
+            if not self.keep_difficult and difficult:
+                continue
+            name = obj.find('name').text.lower().strip()
+            bbox = obj.find('bndbox')
+
+            pts = ['xmin', 'ymin', 'xmax', 'ymax']
+            bndbox = []
+            for i, pt in enumerate(pts):
+                cur_pt = float(bbox.find(pt).text) - 1
+                # scale height or width
+                # cur_pt = cur_pt / width if i % 2 == 0 else cur_pt / height
+                bndbox.append(cur_pt)
+            label_idx = self.class_to_ind[name]
+            bndbox.append(label_idx)
+            res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
+
+            img_id = target.find('filename').text[:-4]
+        return res  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
+
+
+class VOCDetection(data.Dataset):
+    """VOC Detection Dataset Object
+    input is image, target is annotation
+    Arguments:
+        root (string): filepath to VOCdevkit folder.
+        image_set (string): imageset to use (eg. 'train', 'val', 'test')
+        transform (callable, optional): transformation to perform on the
+            input image
+        target_transform (callable, optional): transformation to perform on the
+            target `annotation`
+            (eg: take in caption string, return tensor of word indices)
+        dataset_name (string, optional): which dataset to load
+            (default: 'VOC2007')
+    """
+
+    def __init__(self, dataset_name, root, image_sets, overfit,
+                 transform=None):
+        self.root = root
+        self.image_set = image_sets
         self.transform = transform
+        self.target_transform = target_transform=VOCAnnotationTransform(dataset_name)
+        self.name = dataset_name
+        self._annopath = osp.join('%s', 'Annotations', '%s.xml')
+        self._imgpath = osp.join('%s', 'Images', '%s.jpg')
+        self.ids = list()
+        self.rootpath = osp.join(self.root, self.name)
 
-        self.coco      = COCO(os.path.join(self.root_dir, 'annotations', 'instances_' + self.set_name + '.json'))
-        self.image_ids = self.coco.getImgIds()
+        if self.name == "Pasadena":
+            self.VOC_CLASSES = ["tree"]
+        elif self.name == "mapillary":
+            self.VOC_CLASSES = ["sign"]
 
-        self.load_classes()
+        dataset_dir = 'Main'
+        if overfit == 1:
+            dataset_dir = 'Main_Overfit'
 
-    def load_classes(self):
-        # load class names (name -> label)
-        categories = self.coco.loadCats(self.coco.getCatIds())
-        categories.sort(key=lambda x: x['id'])
+        for line in open(osp.join(self.rootpath, 'ImageSets', dataset_dir, self.image_set + '.txt')):
+            self.ids.append((self.rootpath, line.strip()))
 
-        self.classes             = {}
-        self.coco_labels         = {}
-        self.coco_labels_inverse = {}
-        for c in categories:
-            self.coco_labels[len(self.classes)] = c['id']
-            self.coco_labels_inverse[c['id']] = len(self.classes)
-            self.classes[c['name']] = len(self.classes)
+    def __getitem__(self, index):
+        img_id = self.ids[index]
 
-        # also load the reverse (label -> name)
-        self.labels = {}
-        for key, value in self.classes.items():
-            self.labels[value] = key
+        target = ET.parse(self._annopath % img_id).getroot()
+        img = cv2.imread(self._imgpath % img_id)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32)/255.
+        height, width, channels = img.shape
 
-    def __len__(self):
-        return len(self.image_ids)
-
-    def __getitem__(self, idx):
-
-        img = self.load_image(idx)
-        annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
-        if self.transform:
+        if self.target_transform is not None:
+            target = self.target_transform(target, width, height)
+        target = np.array(target)
+        sample = {'img': img, 'annot': target}
+        if self.transform is not None:
             sample = self.transform(sample)
-
         return sample
 
-    def load_image(self, image_index):
-        image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
-        path       = os.path.join(self.root_dir, 'images', self.set_name, image_info['file_name'])
-        img = skimage.io.imread(path)
+        bbox = target[:, :4]
+        labels = target[:, 4]
 
-        if len(img.shape) == 2:
-            img = skimage.color.gray2rgb(img)
+        if self.transform is not None:
+            annotation = {'image': img, 'bboxes': bbox, 'category_id': labels}
+            augmentation = self.transform(**annotation)
+            img = augmentation['image']
+            bbox = augmentation['bboxes']
+            labels = augmentation['category_id']
+        return {'image': img, 'bboxes': bbox, 'category_id': labels}
 
-        return img.astype(np.float32)/255.0
-
-    def load_annotations(self, image_index):
-        # get ground truth annotations
-        annotations_ids = self.coco.getAnnIds(imgIds=self.image_ids[image_index], iscrowd=False)
-        annotations     = np.zeros((0, 5))
-
-        # some images appear to miss annotations (like image with id 257034)
-        if len(annotations_ids) == 0:
-            return annotations
-
-        # parse annotations
-        coco_annotations = self.coco.loadAnns(annotations_ids)
-        for idx, a in enumerate(coco_annotations):
-
-            # some annotations have basically no width / height, skip them
-            if a['bbox'][2] < 1 or a['bbox'][3] < 1:
-                continue
-
-            annotation        = np.zeros((1, 5))
-            annotation[0, :4] = a['bbox']
-            annotation[0, 4]  = self.coco_label_to_label(a['category_id'])
-            annotations       = np.append(annotations, annotation, axis=0)
-
-        # transform from [x, y, w, h] to [x1, y1, x2, y2]
-        annotations[:, 2] = annotations[:, 0] + annotations[:, 2]
-        annotations[:, 3] = annotations[:, 1] + annotations[:, 3]
-
-        return annotations
-
-    def coco_label_to_label(self, coco_label):
-        return self.coco_labels_inverse[coco_label]
-
-
-    def label_to_coco_label(self, label):
-        return self.coco_labels[label]
-
-    def image_aspect_ratio(self, image_index):
-        image = self.coco.loadImgs(self.image_ids[image_index])[0]
-        return float(image['width']) / float(image['height'])
+    def __len__(self):
+        return len(self.ids)
 
     def num_classes(self):
-        return 80
-
-
-class CSVDataset(Dataset):
-    """CSV dataset."""
-
-    def __init__(self, train_file, class_list, transform=None):
-        """
-        Args:
-            train_file (string): CSV file with training annotations
-            annotations (string): CSV file with class list
-            test_file (string, optional): CSV file with testing annotations
-        """
-        self.train_file = train_file
-        self.class_list = class_list
-        self.transform = transform
-
-        # parse the provided class file
-        try:
-            with self._open_for_csv(self.class_list) as file:
-                self.classes = self.load_classes(csv.reader(file, delimiter=','))
-        except ValueError as e:
-            raise_from(ValueError('invalid CSV class file: {}: {}'.format(self.class_list, e)), None)
-
-        self.labels = {}
-        for key, value in self.classes.items():
-            self.labels[value] = key
-
-        # csv with img_path, x1, y1, x2, y2, class_name
-        try:
-            with self._open_for_csv(self.train_file) as file:
-                self.image_data = self._read_annotations(csv.reader(file, delimiter=','), self.classes)
-        except ValueError as e:
-            raise_from(ValueError('invalid CSV annotations file: {}: {}'.format(self.train_file, e)), None)
-        self.image_names = list(self.image_data.keys())
-
-    def _parse(self, value, function, fmt):
-        """
-        Parse a string into a value, and format a nice ValueError if it fails.
-        Returns `function(value)`.
-        Any `ValueError` raised is catched and a new `ValueError` is raised
-        with message `fmt.format(e)`, where `e` is the caught `ValueError`.
-        """
-        try:
-            return function(value)
-        except ValueError as e:
-            raise_from(ValueError(fmt.format(e)), None)
-
-    def _open_for_csv(self, path):
-        """
-        Open a file with flags suitable for csv.reader.
-        This is different for python2 it means with mode 'rb',
-        for python3 this means 'r' with "universal newlines".
-        """
-        if sys.version_info[0] < 3:
-            return open(path, 'rb')
-        else:
-            return open(path, 'r', newline='')
-
-
-    def load_classes(self, csv_reader):
-        result = {}
-
-        for line, row in enumerate(csv_reader):
-            line += 1
-
-            try:
-                class_name, class_id = row
-            except ValueError:
-                raise_from(ValueError('line {}: format should be \'class_name,class_id\''.format(line)), None)
-            class_id = self._parse(class_id, int, 'line {}: malformed class ID: {{}}'.format(line))
-
-            if class_name in result:
-                raise ValueError('line {}: duplicate class name: \'{}\''.format(line, class_name))
-            result[class_name] = class_id
-        return result
-
-
-    def __len__(self):
-        return len(self.image_names)
-
-    def __getitem__(self, idx):
-
-        img = self.load_image(idx)
-        annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
-        if self.transform:
-            sample = self.transform(sample)
-
-        return sample
-
-    def load_image(self, image_index):
-        img = skimage.io.imread(self.image_names[image_index])
-
-        if len(img.shape) == 2:
-            img = skimage.color.gray2rgb(img)
-
-        return img.astype(np.float32)/255.0
-
-    def load_annotations(self, image_index):
-        # get ground truth annotations
-        annotation_list = self.image_data[self.image_names[image_index]]
-        annotations     = np.zeros((0, 5))
-
-        # some images appear to miss annotations (like image with id 257034)
-        if len(annotation_list) == 0:
-            return annotations
-
-        # parse annotations
-        for idx, a in enumerate(annotation_list):
-            # some annotations have basically no width / height, skip them
-            x1 = a['x1']
-            x2 = a['x2']
-            y1 = a['y1']
-            y2 = a['y2']
-
-            if (x2-x1) < 1 or (y2-y1) < 1:
-                continue
-
-            annotation        = np.zeros((1, 5))
-            
-            annotation[0, 0] = x1
-            annotation[0, 1] = y1
-            annotation[0, 2] = x2
-            annotation[0, 3] = y2
-
-            annotation[0, 4]  = self.name_to_label(a['class'])
-            annotations       = np.append(annotations, annotation, axis=0)
-
-        return annotations
-
-    def _read_annotations(self, csv_reader, classes):
-        result = {}
-        for line, row in enumerate(csv_reader):
-            line += 1
-
-            try:
-                img_file, x1, y1, x2, y2, class_name = row[:6]
-            except ValueError:
-                raise_from(ValueError('line {}: format should be \'img_file,x1,y1,x2,y2,class_name\' or \'img_file,,,,,\''.format(line)), None)
-
-            if img_file not in result:
-                result[img_file] = []
-
-            # If a row contains only an image path, it's an image without annotations.
-            if (x1, y1, x2, y2, class_name) == ('', '', '', '', ''):
-                continue
-
-            x1 = self._parse(x1, int, 'line {}: malformed x1: {{}}'.format(line))
-            y1 = self._parse(y1, int, 'line {}: malformed y1: {{}}'.format(line))
-            x2 = self._parse(x2, int, 'line {}: malformed x2: {{}}'.format(line))
-            y2 = self._parse(y2, int, 'line {}: malformed y2: {{}}'.format(line))
-
-            # Check that the bounding box is valid.
-            if x2 <= x1:
-                raise ValueError('line {}: x2 ({}) must be higher than x1 ({})'.format(line, x2, x1))
-            if y2 <= y1:
-                raise ValueError('line {}: y2 ({}) must be higher than y1 ({})'.format(line, y2, y1))
-
-            # check if the current class name is correctly present
-            if class_name not in classes:
-                raise ValueError('line {}: unknown class name: \'{}\' (classes: {})'.format(line, class_name, classes))
-
-            result[img_file].append({'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2, 'class': class_name})
-        return result
-
-    def name_to_label(self, name):
-        return self.classes[name]
+        return len(self.VOC_CLASSES)
 
     def label_to_name(self, label):
-        return self.labels[label]
+        return self.VOC_CLASSES[label]
 
-    def num_classes(self):
-        return max(self.classes.values()) + 1
+    def load_annotations(self, index):
+        img_id = self.ids[index]
+        anno = ET.parse(self._annopath % img_id).getroot()
+        gt = self.target_transform(anno, 1, 1)
+        gt = np.array(gt)
+        return gt
 
-    def image_aspect_ratio(self, image_index):
-        image = Image.open(self.image_names[image_index])
-        return float(image.width) / float(image.height)
 
 
 def collater(data):
