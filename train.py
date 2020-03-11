@@ -37,7 +37,8 @@ def main(args=None):
                         help="Early stopping's parameter: minimum change loss to qualify as an improvement")
     parser.add_argument("--es_patience", type=int, default=0,
                         help="Early stopping's parameter: number of epochs with no improvement after which training will be stopped. Set to 0 to disable this technique.")
-
+    parser.add_argument("--cluster", type=int, default=0)
+    
     opt = parser.parse_args(args)
     if torch.cuda.is_available():
         num_gpus = torch.cuda.device_count()
@@ -157,15 +158,15 @@ def main(args=None):
 
                 epoch_loss.append(float(loss))
                 total_loss = np.mean(epoch_loss)
-
-
-                progress_bar.set_description(
+                
+                if opt.cluster == 1:
+                    progress_bar.set_description(
                     'Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Batch loss: {:.5f} Total loss: {:.5f}'.format(
                         epoch + 1, opt.num_epochs, iter + 1, num_iter_per_epoch, classification_loss, regression_loss, float(loss),
                         total_loss))
-                writer.add_scalar('Train/Total_loss', total_loss, epoch * num_iter_per_epoch + iter)
-                writer.add_scalar('Train/Regression_loss', regression_loss, epoch * num_iter_per_epoch + iter)
-                writer.add_scalar('Train/Classfication_loss (focal loss)', classification_loss, epoch * num_iter_per_epoch + iter)
+                    writer.add_scalar('Train/Total_loss', total_loss, epoch * num_iter_per_epoch + iter)
+                    writer.add_scalar('Train/Regression_loss', regression_loss, epoch * num_iter_per_epoch + iter)
+                    writer.add_scalar('Train/Classfication_loss (focal loss)', classification_loss, epoch * num_iter_per_epoch + iter)
 
                 del classification_loss
                 del regression_loss
