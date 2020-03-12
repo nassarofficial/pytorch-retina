@@ -18,13 +18,10 @@ print('CUDA available: {}'.format(torch.cuda.is_available()))
 
 
 def main(args=None):
-    parser = argparse.ArgumentParser(description='Simple training script for training a RetinaNet network.')
+    parser = argparse.ArgumentParser(description='RegiGraph Pytorch Implementation Training Script. - Ahmed Nassar (ETHZ, IRISA).')
     parser.add_argument("--batch_size", type=int, default=4, help="The number of images per batch")
     parser.add_argument("--lr", type=float, default=1e-4)
-
-    parser.add_argument('--dataset_root',
-        default='/root/data/VOCdevkit/',
-        help='Dataset root directory path [/root/data/VOCdevkit/, /root/data/coco/]')
+    parser.add_argument('--dataset_root', default='../datasets', help='Dataset root directory path [../datasets/VOC, ../datasets/mapillary]')
     parser.add_argument('--dataset', default='Pasadena', choices=['Pasadena', 'mapillary'],
                         type=str, help='Pasadena or mapillary')
     parser.add_argument("--overfit", type=int, default="0")
@@ -59,7 +56,7 @@ def main(args=None):
                    "shuffle": True,
                    "drop_last": True,
                    "collate_fn": collater,
-                   "num_workers": 12}
+                   "num_workers": 4}
 
     training_generator = DataLoader(train_dataset, **training_params)
 
@@ -68,7 +65,7 @@ def main(args=None):
                "shuffle": False,
                "drop_last": False,
                "collate_fn": collater,
-               "num_workers": 12}
+               "num_workers": 4}
         # sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=1, drop_last=False)
         test_generator = DataLoader(valid_dataset, **test_params)
 
@@ -136,9 +133,9 @@ def main(args=None):
                 optimizer.zero_grad()
 
                 if torch.cuda.is_available():
-                    classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot']])
+                    classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot'], data['batch_map']])
                 else:
-                    classification_loss, regression_loss = retinanet([data['img'].float(), data['annot']])
+                    classification_loss, regression_loss = retinanet([data['img'].float(), data['annot'], data['batch_map']])
                     
                 classification_loss = classification_loss.mean()
                 regression_loss = regression_loss.mean()
@@ -159,7 +156,7 @@ def main(args=None):
                 epoch_loss.append(float(loss))
                 total_loss = np.mean(epoch_loss)
                 
-                if opt.cluster == 1:
+                if opt.cluster == 0:
                     progress_bar.set_description(
                     'Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Batch loss: {:.5f} Total loss: {:.5f}'.format(
                         epoch + 1, opt.num_epochs, iter + 1, num_iter_per_epoch, classification_loss, regression_loss, float(loss),

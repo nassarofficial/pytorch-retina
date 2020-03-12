@@ -229,9 +229,9 @@ class ResNet(nn.Module):
                 layer.eval()
 
     def forward(self, inputs):
-        if len(inputs) == 2:
+        if len(inputs) == 3:
             self.training = True
-            img_batch, annotations = inputs
+            img_batch, annotations, batch_map  = inputs
         else:
             img_batch = inputs
 
@@ -254,7 +254,7 @@ class ResNet(nn.Module):
         anchors = self.anchors(img_batch)
 
         if self.training:
-            return self.focalLoss(classification, regression, anchors, annotations)
+            return self.focalLoss(classification, regression, anchors, annotations, batch_map)
         else:
             transformed_anchors = self.regressBoxes(anchors, regression)
             transformed_anchors = self.clipBoxes(transformed_anchors, img_batch)

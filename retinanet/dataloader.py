@@ -10,6 +10,8 @@ import torch.utils.data as data
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from torch.utils.data.sampler import Sampler
+from random import shuffle
+
 
 from pycocotools.coco import COCO
 import cv2
@@ -24,10 +26,6 @@ else:
 import pickle
 from PIL import Image
 
-
-
-# note: if you used our download scripts, this should be right
-VOC_ROOT = osp.join('/home/toandm2', "data/VOCdevkit/")
 
 class VOCAnnotationTransform(object):
     """Transforms a VOC annotation into a Tensor of bbox coords and label index
@@ -105,7 +103,7 @@ class VOCDetection(data.Dataset):
         self.name = dataset_name
         self._annopath = osp.join('%s', 'Annotations', '%s.xml')
         self._imgpath = osp.join('%s', 'Images', '%s.jpg')
-        self.ids = list()
+        self.ids = []
         self.rootpath = osp.join(self.root, self.name)
 
         if self.name == "Pasadena":
@@ -117,39 +115,46 @@ class VOCDetection(data.Dataset):
         if overfit == 1:
             dataset_dir = 'Main_Overfit'
 
-        for line in open(osp.join(self.rootpath, 'ImageSets', dataset_dir, self.image_set + '.txt')):
-            self.ids.append((self.rootpath, line.strip()))
+        self.ids_full = []
+        sub_ids = []
+        for line in open(osp.join(self.rootpath, 'ImageSets', 'Main', self.image_set + '.txt')):
+            sub_ids.append((self.rootpath, line.strip()))
+            if len(sub_ids) == 4:
+                self.ids_full.append(sub_ids)
+                sub_ids = []
 
     def __getitem__(self, index):
-        img_id = self.ids[index]
+        img_ids = self.ids_full[index]
+        items = []
+        for i in range(len(img_ids)):
+            target = ET.parse(self._annopath % img_ids[i]).getroot()
+            img = cv2.imread(self._imgpath % img_ids[i])
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = img.astype(np.float32)/255.
+            height, width, channels = img.shape
 
-        target = ET.parse(self._annopath % img_id).getroot()
-        img = cv2.imread(self._imgpath % img_id)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.astype(np.float32)/255.
-        height, width, channels = img.shape
+            if self.target_transform is not None:
+                target = self.target_transform(target, width, height)
 
-        if self.target_transform is not None:
-            target = self.target_transform(target, width, height)
-        target = np.array(target)
-        sample = {'img': img, 'annot': target}
-        if self.transform is not None:
-            sample = self.transform(sample)
-        return sample
-
-        bbox = target[:, :4]
-        labels = target[:, 4]
-
-        if self.transform is not None:
-            annotation = {'image': img, 'bboxes': bbox, 'category_id': labels}
-            augmentation = self.transform(**annotation)
-            img = augmentation['image']
-            bbox = augmentation['bboxes']
-            labels = augmentation['category_id']
-        return {'image': img, 'bboxes': bbox, 'category_id': labels}
+            target = np.array(target)
+            sample = {'img': img, 'annot': target}
+            if self.transform is not None:
+                sample = self.transform(sample)
+                items.append(sample)
+            else:
+                bbox = target[:, :4]
+                labels = target[:, 4]
+                if self.transform is not None:
+                    annotation = {'image': img, 'bboxes': bbox, 'category_id': labels}
+                    augmentation = self.transform(**annotation)
+                    img = augmentation['image']
+                    bbox = augmentation['bboxes']
+                    labels = augmentation['category_id']
+                    items.append({'image': img, 'bboxes': bbox, 'category_id': labels})
+        return items
 
     def __len__(self):
-        return len(self.ids)
+        return len(self.ids_full)
 
     def num_classes(self):
         return len(self.VOC_CLASSES)
@@ -167,11 +172,23 @@ class VOCDetection(data.Dataset):
 
 
 def collater(data):
+    # implement for multiple batch sizes
+    imgs = []
+    annots = []
+    scales = []
+    batch_map = {}
+    for i in range(len(data)):
+        for j in range(len(data[i])):
+            imgs.append(data[i][j]['img'])
+            annots.append(data[i][j]['annot'])
+            scales.append(data[i][j]['scale'])
+        batch_map[i] = len(data[i])
+        # imgs.append(data[i][0]['img'])
+        # annots.append(data[i][0]['annot'])
+        # scales.append(data[i][0]['scale'])
 
-    imgs = [s['img'] for s in data]
-    annots = [s['annot'] for s in data]
-    scales = [s['scale'] for s in data]
-        
+    # print("123 :", len(imgs))
+    # print("123 :", imgs[0])
     widths = [int(s.shape[0]) for s in imgs]
     heights = [int(s.shape[1]) for s in imgs]
     batch_size = len(imgs)
@@ -202,7 +219,7 @@ def collater(data):
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
-    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales}
+    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales, 'batch_map': batch_map}
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
@@ -324,3 +341,26 @@ class AspectRatioBasedSampler(Sampler):
 
         # divide into groups, one group = one batch
         return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in range(0, len(order), self.batch_size)]
+
+# class RandomSamplerMod(Sampler):
+#     r"""Takes a dataset with cluster_indices property, cuts it into batch-sized chunks
+#     Drops the extra items, not fitting into exact batches
+#     Arguments:
+#         data_source (Dataset): a Dataset to sample from. Should have a cluster_indices property
+#         batch_size (int): a batch size that you would like to use later with Dataloader class
+#         shuffle (bool): whether to shuffle the data or not
+#     """
+
+#     def __init__(self, data_source, batch_size, shuffle=True):
+#         self.data_source = data_source
+#         self.batch_size = batch_size
+#         self.shuffle = shuffle
+#         self.indices = list(range(len(self.data_source.ids_full)))
+#         self.n = len(self.indices)
+
+#     def __iter__(self):
+#         return iter(torch.randperm(self.n).tolist())
+
+
+#     def __len__(self):
+#         return len(self.data_source)
