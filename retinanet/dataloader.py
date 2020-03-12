@@ -41,7 +41,7 @@ class VOCAnnotationTransform(object):
 
     def __init__(self, dataset_name,class_to_ind=None, keep_difficult=False):
         self.dataset_name = dataset_name
-        if self.dataset_name == 'Pasadena':
+        if self.dataset_name == 'Pasadena' or "Pasadena_Aerial":
             self.class_to_ind = {'tree':0}
         elif self.dataset_name == 'mapillary':
             self.class_to_ind = {'sign':0}
@@ -106,7 +106,7 @@ class VOCDetection(data.Dataset):
         self.ids = []
         self.rootpath = osp.join(self.root, self.name)
 
-        if self.name == "Pasadena":
+        if self.name == "Pasadena" or "Pasadena_Aerial":
             self.VOC_CLASSES = ["tree"]
         elif self.name == "mapillary":
             self.VOC_CLASSES = ["sign"]
@@ -115,20 +115,21 @@ class VOCDetection(data.Dataset):
         if overfit == 1:
             dataset_dir = 'Main_Overfit'
 
-        self.ids_full = []
-        sub_ids = []
-        for line in open(osp.join(self.rootpath, 'ImageSets', 'Main', self.image_set + '.txt')):
-            sub_ids.append((self.rootpath, line.strip()))
-            if len(sub_ids) == 4:
-                self.ids_full.append(sub_ids)
-                sub_ids = []
+        self.ids_full = pickle.load( open( osp.join(self.rootpath, 'ImageSets', 'Main', self.image_set + '.p'), "rb" ) )
+        # self.ids_full = []
+        # sub_ids = []
+        # for line in open(osp.join(self.rootpath, 'ImageSets', 'Main', self.image_set + '.txt')):
+        #     sub_ids.append((self.rootpath, line.strip()))
+        #     if len(sub_ids) == 4:
+        #         self.ids_full.append(sub_ids)
+        #         sub_ids = []
 
     def __getitem__(self, index):
         img_ids = self.ids_full[index]
         items = []
         for i in range(len(img_ids)):
-            target = ET.parse(self._annopath % img_ids[i]).getroot()
-            img = cv2.imread(self._imgpath % img_ids[i])
+            target = ET.parse(self._annopath % (self.rootpath, img_ids[i])).getroot()
+            img = cv2.imread(self._imgpath % (self.rootpath, img_ids[i]))
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = img.astype(np.float32)/255.
             height, width, channels = img.shape

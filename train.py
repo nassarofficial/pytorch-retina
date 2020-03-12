@@ -22,8 +22,8 @@ def main(args=None):
     parser.add_argument("--batch_size", type=int, default=4, help="The number of images per batch")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument('--dataset_root', default='../datasets', help='Dataset root directory path [../datasets/VOC, ../datasets/mapillary]')
-    parser.add_argument('--dataset', default='Pasadena', choices=['Pasadena', 'mapillary'],
-                        type=str, help='Pasadena or mapillary')
+    parser.add_argument('--dataset', default='Pasadena', choices=['Pasadena', 'Pasadena_Aerial', 'mapillary'],
+                        type=str, help='Pasadena, Pasadena_Aerial or mapillary')
     parser.add_argument("--overfit", type=int, default="0")
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument("--num_epochs", type=int, default=100)
@@ -43,7 +43,7 @@ def main(args=None):
     else:
         torch.manual_seed(123)
 
-    if(opt.dataset == 'Pasadena' or opt.dataset == 'mapillary'):
+    if(opt.dataset == 'Pasadena' or opt.dataset == 'mapillary' or opt.dataset == 'Pasadena_Aerial'):
         train_dataset = VOCDetection(root=opt.dataset_root, overfit= opt.overfit, image_sets="trainval", transform=transforms.Compose([Normalizer(), Augmenter(), Resizer()]), dataset_name=opt.dataset)
         valid_dataset = VOCDetection(root=opt.dataset_root, overfit= opt.overfit, image_sets="val", transform=transforms.Compose([Normalizer(), Resizer()]), dataset_name=opt.dataset)
 
