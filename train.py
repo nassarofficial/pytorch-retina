@@ -180,7 +180,7 @@ def main(args=None):
             for iter, data in enumerate(test_generator):
                 with torch.no_grad():
                     if torch.cuda.is_available():
-                        classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot']])
+                        classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot'], data['batch_map']])
                     else:
                         classification_loss, regression_loss = retinanet([data['img'].float(), data['annot']])
 

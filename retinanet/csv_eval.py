@@ -80,9 +80,11 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
     retinanet.eval()
     
     with torch.no_grad():
-
+        print(len(dataset))
         for index in range(len(dataset)):
             data = dataset[index]
+            # print(len(dataset[index]))
+            data = data[0]
             scale = data['scale']
 
             # run network
@@ -120,7 +122,7 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
                 for label in range(dataset.num_classes()):
                     all_detections[index][label] = np.zeros((0, 5))
 
-            print('{}/{}'.format(index + 1, len(dataset)), end='\r')
+            # print('{}/{}'.format(index + 1, len(dataset)), end='\r')
 
     return all_detections
 
@@ -137,14 +139,15 @@ def _get_annotations(generator):
     all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
     for i in range(len(generator)):
+        print("generator:", len(generator))
         # load the annotations
-        annotations = generator.load_annotations(i)
+        annotations = generator.load_annotations(i)[0]
 
         # copy detections to all_annotations
         for label in range(generator.num_classes()):
             all_annotations[i][label] = annotations[annotations[:, 4] == label, :4].copy()
 
-        print('{}/{}'.format(i + 1, len(generator)), end='\r')
+        # print('{}/{}'.format(i + 1, len(generator)), end='\r')
 
     return all_annotations
 

@@ -164,11 +164,14 @@ class VOCDetection(data.Dataset):
         return self.VOC_CLASSES[label]
 
     def load_annotations(self, index):
-        img_id = self.ids[index]
-        anno = ET.parse(self._annopath % img_id).getroot()
-        gt = self.target_transform(anno, 1, 1)
-        gt = np.array(gt)
-        return gt
+        img_ids = self.ids_full[index]
+        gts = []
+        for i in range(len(img_ids)):
+            anno = ET.parse(self._annopath % (self.rootpath, img_ids[i])).getroot()
+            gt = self.target_transform(anno, 1, 1)
+            gt = np.array(gt)
+            gts.append(gt)
+        return gts
 
 
 
