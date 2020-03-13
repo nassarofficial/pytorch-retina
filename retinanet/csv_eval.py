@@ -139,7 +139,7 @@ def _get_annotations(generator):
     all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
     for i in range(len(generator)):
-        print("generator:", len(generator))
+        # print("generator:", len(generator))
         # load the annotations
         annotations = generator.load_annotations(i)[0]
 
