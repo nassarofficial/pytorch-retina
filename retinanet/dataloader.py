@@ -48,6 +48,46 @@ class VOCAnnotationTransform(object):
 
         self.keep_difficult = keep_difficult
 
+    def normalizer(self, x, mode, dataset):
+        if dataset == "Pasadena":
+            minn,maxx=0,0
+            if mode == 'yaw':
+                minn,maxx = 0.0, 360
+            elif mode == 'pitch':
+                minn,maxx = 0.03, 9.46
+            elif mode == 'pano_lat':
+                minn,maxx = 34.12397, 34.177644
+            elif mode == 'pano_lng':
+                minn,maxx = -118.185097, -118.073197
+            elif mode == 'obj_lat':
+                minn,maxx = 34.12406212011486, 34.17751982080085
+            elif mode == 'obj_lng':
+                minn,maxx = -118.18505646290065, -118.07330317391417
+            elif mode == 'width':
+                minn,maxx = 0,13312
+            elif mode == 'height':
+                minn,maxx = 0,6656
+            normalized = (x-minn)/(maxx-minn)
+        else:
+            # Mapillary Normalization
+            minn,maxx=0,0
+            if mode == 'yaw':
+                minn,maxx = 0.0, 360
+            elif mode == 'pano_lat':
+                minn,maxx = 34.12397, 34.177644
+            elif mode == 'pano_lng':
+                minn,maxx = -0.40344755026555484, 0.11468149304376465
+            elif mode == 'obj_lat':
+                minn,maxx = 51.402448659857235, 51.610936663987154
+            elif mode == 'obj_lng':
+                minn,maxx = -0.40361261546491295, 0.1148465169449277
+            elif mode == 'width':
+                minn,maxx = 0,13312
+            elif mode == 'height':
+                minn,maxx = 0,6656
+            normalized = (x-minn)/(maxx-minn)
+        return normalized
+
     def __call__(self, target, width, height):
         """
         Arguments:
@@ -57,12 +97,25 @@ class VOCAnnotationTransform(object):
             a list containing lists of bounding boxes  [bbox coords, class name]
         """
         res = []
+
         for obj in target.iter('object'):
             difficult = int(obj.find('difficult').text) == 1
             if not self.keep_difficult and difficult:
                 continue
             name = obj.find('name').text.lower().strip()
             bbox = obj.find('bndbox')
+            ID = int(obj.find('ID').text)
+
+            tree_location = obj.find('location').text
+
+            if tree_location == "None":
+                latitude = -1
+                longitude = -1
+            else:
+                tree_location = tree_location.split(",")
+                latitude = self.normalizer(float(tree_location[1]),"obj_lat",self.dataset_name)
+                longitude = self.normalizer(float(tree_location[0]),"obj_lng",self.dataset_name)
+
 
             pts = ['xmin', 'ymin', 'xmax', 'ymax']
             bndbox = []
@@ -73,6 +126,9 @@ class VOCAnnotationTransform(object):
                 bndbox.append(cur_pt)
             label_idx = self.class_to_ind[name]
             bndbox.append(label_idx)
+            bndbox.append(ID)
+            bndbox.append(latitude)
+            bndbox.append(longitude)
             res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
 
             img_id = target.find('filename').text[:-4]
@@ -123,22 +179,75 @@ class VOCDetection(data.Dataset):
         #     if len(sub_ids) == 4:
         #         self.ids_full.append(sub_ids)
         #         sub_ids = []
+    def normalizer(self, x, mode, dataset):
+        if dataset == "Pasadena":
+            minn,maxx=0,0
+            if mode == 'yaw':
+                minn,maxx = 0.0, 360
+            elif mode == 'pitch':
+                minn,maxx = 0.03, 9.46
+            elif mode == 'pano_lat':
+                minn,maxx = 34.12397, 34.177644
+            elif mode == 'pano_lng':
+                minn,maxx = -118.185097, -118.073197
+            elif mode == 'obj_lat':
+                minn,maxx = 34.12406212011486, 34.17751982080085
+            elif mode == 'obj_lng':
+                minn,maxx = -118.18505646290065, -118.07330317391417
+            elif mode == 'width':
+                minn,maxx = 0,13312
+            elif mode == 'height':
+                minn,maxx = 0,6656
+            normalized = (x-minn)/(maxx-minn)
+        else:
+            # Mapillary Normalization
+            minn,maxx=0,0
+            if mode == 'yaw':
+                minn,maxx = 0.0, 360
+            elif mode == 'pano_lat':
+                minn,maxx = 34.12397, 34.177644
+            elif mode == 'pano_lng':
+                minn,maxx = -0.40344755026555484, 0.11468149304376465
+            elif mode == 'obj_lat':
+                minn,maxx = 51.402448659857235, 51.610936663987154
+            elif mode == 'obj_lng':
+                minn,maxx = -0.40361261546491295, 0.1148465169449277
+            elif mode == 'width':
+                minn,maxx = 0,13312
+            elif mode == 'height':
+                minn,maxx = 0,6656
+            normalized = (x-minn)/(maxx-minn)
+        return normalized
 
     def __getitem__(self, index):
         img_ids = self.ids_full[index]
         items = []
         for i in range(len(img_ids)):
-            target = ET.parse(self._annopath % (self.rootpath, img_ids[i])).getroot()
-            img = cv2.imread(self._imgpath % (self.rootpath, img_ids[i]))
+            if self.name == "Pasadena":
+                target = ET.parse(self._annopath % (self.rootpath, img_ids[i]+"_z2")).getroot()
+                img = cv2.imread(self._imgpath % (self.rootpath, img_ids[i]+"_z2"))
+                geo = pickle.load(open(osp.join(self.rootpath,"GeoFeats",img_ids[i]+".p"), "rb" )) 
+
+            else:
+                target = ET.parse(self._annopath % (self.rootpath, img_ids[i])).getroot()
+                img = cv2.imread(self._imgpath % (self.rootpath, img_ids[i]))
+                geo = pickle.load(open(osp.join(self.rootpath,"GeoFeats",img_ids[i]+".p"), "rb" ))
+
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = img.astype(np.float32)/255.
+
+            pano_lat = self.normalizer(float(geo['lat']),"pano_lat",self.name)
+            pano_lng = self.normalizer(float(geo['lng']),"pano_lng",self.name)
+            yaw = self.normalizer(float(geo['yaw']),"yaw",self.name)
+            geo_dat = np.array([pano_lat,pano_lng,yaw])
+
             height, width, channels = img.shape
 
             if self.target_transform is not None:
                 target = self.target_transform(target, width, height)
 
             target = np.array(target)
-            sample = {'img': img, 'annot': target}
+            sample = {'img': img, 'annot': target, 'geo': geo_dat}
             if self.transform is not None:
                 sample = self.transform(sample)
                 items.append(sample)
@@ -151,7 +260,7 @@ class VOCDetection(data.Dataset):
                     img = augmentation['image']
                     bbox = augmentation['bboxes']
                     labels = augmentation['category_id']
-                    items.append({'image': img, 'bboxes': bbox, 'category_id': labels})
+                    items.append({'image': img, 'bboxes': bbox, "geo":geo_dat, 'category_id': labels})
         return items
 
     def __len__(self):
@@ -180,12 +289,14 @@ def collater(data):
     imgs = []
     annots = []
     scales = []
+    geos = [] 
     batch_map = {}
     for i in range(len(data)):
         for j in range(len(data[i])):
             imgs.append(data[i][j]['img'])
             annots.append(data[i][j]['annot'])
             scales.append(data[i][j]['scale'])
+            geos.append(data[i][j]['geo'])
         batch_map[i] = len(data[i])
         # imgs.append(data[i][0]['img'])
         # annots.append(data[i][0]['annot'])
@@ -210,7 +321,7 @@ def collater(data):
     
     if max_num_annots > 0:
 
-        annot_padded = torch.ones((len(annots), max_num_annots, 5)) * -1
+        annot_padded = torch.ones((len(annots), max_num_annots, 8)) * -1
 
         if max_num_annots > 0:
             for idx, annot in enumerate(annots):
@@ -218,18 +329,18 @@ def collater(data):
                 if annot.shape[0] > 0:
                     annot_padded[idx, :annot.shape[0], :] = annot
     else:
-        annot_padded = torch.ones((len(annots), 1, 5)) * -1
+        annot_padded = torch.ones((len(annots), 1, 8)) * -1
 
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
-    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales, 'batch_map': batch_map}
+    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales, 'geo': geos, 'batch_map': batch_map}
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, sample, min_side=608, max_side=1024):
-        image, annots = sample['img'], sample['annot']
+        image, annots, geos = sample['img'], sample['annot'], sample['geo']
 
         rows, cols, cns = image.shape
 
@@ -257,7 +368,7 @@ class Resizer(object):
 
         annots[:, :4] *= scale
 
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
+        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale, 'geo': torch.from_numpy(geos)}
 
 
 class Augmenter(object):
@@ -266,7 +377,7 @@ class Augmenter(object):
     def __call__(self, sample, flip_x=0.5):
 
         if np.random.rand() < flip_x:
-            image, annots = sample['img'], sample['annot']
+            image, annots, geos = sample['img'], sample['annot'], sample['geo']
             image = image[:, ::-1, :]
 
             rows, cols, channels = image.shape
@@ -279,7 +390,7 @@ class Augmenter(object):
             annots[:, 0] = cols - x2
             annots[:, 2] = cols - x_tmp
 
-            sample = {'img': image, 'annot': annots}
+            sample = {'img': image, 'annot': annots, 'geo': geos}
 
         return sample
 
@@ -292,9 +403,9 @@ class Normalizer(object):
 
     def __call__(self, sample):
 
-        image, annots = sample['img'], sample['annot']
+        image, annots, geos = sample['img'], sample['annot'], sample['geo']
 
-        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
+        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots, 'geo': geos}
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):

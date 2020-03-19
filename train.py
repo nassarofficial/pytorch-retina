@@ -53,7 +53,7 @@ def main(args=None):
     # sampler = AspectRatioBasedSampler(train_dataset, batch_size=2, drop_last=False)
 
     training_params = {"batch_size": opt.batch_size,
-                   "shuffle": True,
+                   "shuffle": False,
                    "drop_last": True,
                    "collate_fn": collater,
                    "num_workers": 4}
@@ -133,14 +133,15 @@ def main(args=None):
                 optimizer.zero_grad()
 
                 if torch.cuda.is_available():
-                    classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot'], data['batch_map']])
+                    classification_loss, regression_loss, graph_loss = retinanet([data['img'].cuda().float(), data['annot'], data['geo'], data['batch_map']])
                 else:
-                    classification_loss, regression_loss = retinanet([data['img'].float(), data['annot'], data['batch_map']])
-                    
+                    classification_loss, regression_loss, graph_loss = retinanet([data['img'].float(), data['annot'], data['geo'], data['batch_map']])
+                
                 classification_loss = classification_loss.mean()
                 regression_loss = regression_loss.mean()
+                graph_loss = graph_loss.mean()
 
-                loss = classification_loss + regression_loss
+                loss = classification_loss + regression_loss + graph_loss
 
                 if bool(loss == 0):
                     continue
@@ -158,15 +159,17 @@ def main(args=None):
                 
                 if opt.cluster == 0:
                     progress_bar.set_description(
-                    'Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Batch loss: {:.5f} Total loss: {:.5f}'.format(
-                        epoch + 1, opt.num_epochs, iter + 1, num_iter_per_epoch, classification_loss, regression_loss, float(loss),
+                    'Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Graph loss: {:.5f}. Batch loss: {:.5f} Total loss: {:.5f}'.format(
+                        epoch + 1, opt.num_epochs, iter + 1, num_iter_per_epoch, classification_loss, regression_loss, graph_loss, float(loss),
                         total_loss))
                     writer.add_scalar('Train/Total_loss', total_loss, epoch * num_iter_per_epoch + iter)
                     writer.add_scalar('Train/Regression_loss', regression_loss, epoch * num_iter_per_epoch + iter)
                     writer.add_scalar('Train/Classfication_loss (focal loss)', classification_loss, epoch * num_iter_per_epoch + iter)
+                    writer.add_scalar('Train/Graph_loss', graph_loss, epoch * num_iter_per_epoch + iter)
 
                 del classification_loss
                 del regression_loss
+                del graph_loss
             except Exception as e:
                 print(e)
                 continue
@@ -177,35 +180,40 @@ def main(args=None):
             retinanet.eval()
             loss_regression_ls = []
             loss_classification_ls = []
+            loss_graph_ls = []
             for iter, data in enumerate(test_generator):
                 with torch.no_grad():
                     if torch.cuda.is_available():
-                        classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot'], data['batch_map']])
+                        classification_loss, regression_loss, graph_loss = retinanet([data['img'].cuda().float(), data['annot'], data['geo'], data['batch_map']])
                     else:
-                        classification_loss, regression_loss = retinanet([data['img'].float(), data['annot']])
+                        classification_loss, regression_loss, graph_loss = retinanet([data['img'].float(), data['annot'], data['geo'], data['batch_map']])
 
                     classification_loss = classification_loss.mean()
                     regression_loss = regression_loss.mean()
-
+                    graph_loss = graph_loss.mean()
                     loss_classification_ls.append(float(classification_loss))
                     loss_regression_ls.append(float(regression_loss))
+                    loss_graph_ls.append(float(graph_loss))
+                    # print(len(loss_classification_ls),len(loss_regression_ls),len(loss_graph_ls))
 
             cls_loss = np.mean(loss_classification_ls)
             reg_loss = np.mean(loss_regression_ls)
-            loss = cls_loss + reg_loss
+            gph_loss = np.mean(loss_graph_ls)
+            print(gph_loss)
+            loss = cls_loss + reg_loss + gph_loss
 
             print(
-                'Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f}'.format(
-                    epoch + 1, opt.num_epochs, cls_loss, reg_loss, np.mean(loss)))
+                'Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Graph loss: {:1.5f}. Total loss: {:1.5f}'.format(epoch + 1, opt.num_epochs, cls_loss, reg_loss, gph_loss, np.mean(loss)))
             writer.add_scalar('Test/Total_loss', loss, epoch)
             writer.add_scalar('Test/Regression_loss', reg_loss, epoch)
+            writer.add_scalar('Test/Graph_loss (graph loss)', gph_loss, epoch)
             writer.add_scalar('Test/Classfication_loss (focal loss)', cls_loss, epoch)
 
             if loss + opt.es_min_delta < best_loss:
                 best_loss = loss
                 best_epoch = epoch
-                mAP = csv_eval.evaluate(valid_dataset, retinanet)
-                print(mAP)
+                # mAP = csv_eval.evaluate(valid_dataset, retinanet)
+                # print(mAP)
                 torch.save(retinanet.module, os.path.join(opt.saved_path, "regigraph_bs_"+str(opt.batch_size)+"_dataset_"+opt.dataset+"_epoch_"+str(epoch+1)+"_backbone_"+str(opt.depth)+".pth"))
 
             # Early stopping

@@ -1,12 +1,19 @@
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
+from torch_geometric.nn import (GraphConv, EdgePooling, global_mean_pool,
+                                JumpingKnowledge)
+from retinanet.edge_pool_mod import EdgePoolingMod
+from torch_geometric.data import DataLoader, DenseDataLoader as DenseLoader
+from torch_geometric.data import Dataset, Data
+from torch.nn import Linear
 from retinanet.utils import BasicBlock, Bottleneck, BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
+import numpy as np
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
     'resnet34': 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
@@ -14,6 +21,51 @@ model_urls = {
     'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
+
+class GeoGraph(torch.nn.Module):
+    def __init__(self,  hidden, geo, training):
+        super(GeoGraph, self).__init__()
+
+        self.geo = geo
+        self.training = training
+        if self.geo == True:
+            self.conv1 = GraphConv(64 + 3, hidden, aggr='mean')
+        else:
+            self.conv1 = GraphConv(64, hidden, aggr='mean')
+        self.conv2 = GraphConv(hidden, 32, aggr='mean')
+        self.conv3 = GraphConv(32, 16, aggr='mean')
+        self.lin1 = Linear(16, 16)
+        self.pool1 = EdgePoolingMod(16)
+
+    def reset_parameters(self):
+        self.conv1.reset_parameters()
+        self.conv2.reset_parameters()
+        self.conv3.reset_parameters()
+        self.lin1.reset_parameters()
+
+
+    def forward(self, data):
+        #Data(edge_index=[2, 210], neg_edge_index=[2, 182], pos_edge_index=[2, 28], x=[15, 512], x_bbox=[15, 4], x_heading=[15, 2], x_img_pos=[15, 2], x_pos=[15, 2], y=[210])
+        if self.training == True:
+            x, geo, reg, edge_index, edge_y = data.x.cuda(), data.geos.cuda(), data.regressions.cuda(), data.edge_index.cuda(), data.y.cuda()
+            if self.geo == True:
+                # x = torch.cat((x,reg),1)
+                x = torch.cat((x,geo),1)
+        else:
+            x, reg, edge_index = data.x.cuda(), data.regressions.cuda(), data.edge_index.cuda()
+
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.relu(self.conv2(x, edge_index))
+        x = F.relu(self.conv3(x, edge_index))
+        x = x.view(x.size()[0], -1)
+        x = F.relu(self.lin1(x))
+        x = F.dropout(x, p=0.2, training=self.training)
+        x, edge_index, batch, edge_scores = self.pool1(x, edge_index, batch=None)
+        
+        return edge_scores
+
+    def __repr__(self):
+        return self.__class__.__name__
 
 
 class PyramidFeatures(nn.Module):
@@ -151,6 +203,52 @@ class ClassificationModel(nn.Module):
 
         return out2.contiguous().view(x.shape[0], -1, self.num_classes)
 
+class FeatureModel(nn.Module):
+    def __init__(self, num_features_in, num_anchors=9, feature_size_out=64, prior=0.01, feature_size=256):
+        super(FeatureModel, self).__init__()
+        self.feature_size_out = feature_size_out
+        self.num_anchors = num_anchors
+
+        self.conv1 = nn.Conv2d(num_features_in, feature_size, kernel_size=3, padding=1)
+        self.act1 = nn.ReLU()
+
+        self.conv2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, padding=1)
+        self.act2 = nn.ReLU()
+
+        self.conv3 = nn.Conv2d(feature_size, feature_size, kernel_size=3, padding=1)
+        self.act3 = nn.ReLU()
+
+        self.conv4 = nn.Conv2d(feature_size, feature_size, kernel_size=3, padding=1)
+        self.act4 = nn.ReLU()
+
+        self.output = nn.Conv2d(feature_size, num_anchors * self.feature_size_out, kernel_size=3, padding=1)
+        self.output_act = nn.Sigmoid()
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.act1(out)
+
+        out = self.conv2(out)
+        out = self.act2(out)
+
+        out = self.conv3(out)
+        out = self.act3(out)
+
+        out = self.conv4(out)
+        out = self.act4(out)
+
+        out = self.output(out)
+        out = self.output_act(out)
+
+        # out is B x C x W x H, with C = n_classes + n_anchors
+        out1 = out.permute(0, 2, 3, 1)
+
+        batch_size, width, height, channels = out1.shape
+
+        out2 = out1.view(batch_size, width, height, self.num_anchors, self.feature_size_out)
+
+        return out2.contiguous().view(x.shape[0], -1, self.feature_size_out)
+
 
 class ResNet(nn.Module):
 
@@ -179,6 +277,7 @@ class ResNet(nn.Module):
 
         self.regressionModel = RegressionModel(256)
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
+        self.featureModel = FeatureModel(256, feature_size_out=64)
 
         self.anchors = Anchors()
 
@@ -229,11 +328,11 @@ class ResNet(nn.Module):
                 layer.eval()
 
     def forward(self, inputs):
-        if len(inputs) == 3:
+        if len(inputs) == 4:
             self.training = True
-            img_batch, annotations, batch_map  = inputs
+            img_batch, annotations, geos, batch_map  = inputs
         else:
-            img_batch = inputs
+            img_batch, geos, batch_map = inputs
 
         x = self.conv1(img_batch)
         x = self.bn1(x)
@@ -251,10 +350,25 @@ class ResNet(nn.Module):
 
         classification = torch.cat([self.classificationModel(feature) for feature in features], dim=1)
 
-        anchors = self.anchors(img_batch)
+        feats = torch.cat([self.featureModel(feature) for feature in features], dim=1)
 
+        anchors = self.anchors(img_batch)
+        
+        criterion = nn.BCELoss().cuda()
         if self.training:
-            return self.focalLoss(classification, regression, anchors, annotations, batch_map)
+
+            class_loss, regress_loss, graph_data = self.focalLoss(classification, regression, feats, anchors, annotations, geos, batch_map)
+
+            graph_loss = []
+            for data in graph_data:
+                x, geo, reg, edge_index, edge_y = data.x, data.geos, data.regressions, data.edge_index, data.y
+
+                GeoGraphModel = GeoGraph(64, True, True).cuda()
+                edge_scores = GeoGraphModel(data)
+                graph_loss.append(criterion(edge_scores, edge_y.view(-1).float()))
+            graph_loss = torch.mean(torch.stack(graph_loss))
+            return class_loss, regress_loss, graph_loss
+
         else:
             transformed_anchors = self.regressBoxes(anchors, regression)
             transformed_anchors = self.clipBoxes(transformed_anchors, img_batch)

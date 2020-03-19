@@ -1,6 +1,11 @@
-import numpy as np
 import torch
 import torch.nn as nn
+from torch_geometric.data import Data
+import numpy as np
+from itertools import product
+import sys
+import torch.nn.functional as F
+from itertools import combinations
 
 def calc_iou(a, b):
     area = (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
@@ -24,7 +29,7 @@ def calc_iou(a, b):
 class FocalLoss(nn.Module):
     #def __init__(self):
 
-    def forward(self, classifications, regressions, anchors, annotations, batch_map):
+    def forward(self, classifications, regressions, feats, anchors, annotations, geos, batch_map):
         alpha = 0.25
         gamma = 2.0
         batch_size = classifications.shape[0]
@@ -32,16 +37,25 @@ class FocalLoss(nn.Module):
         regression_losses = []
 
         anchor = anchors[0, :, :]
-
         anchor_widths  = anchor[:, 2] - anchor[:, 0]
         anchor_heights = anchor[:, 3] - anchor[:, 1]
         anchor_ctr_x   = anchor[:, 0] + 0.5 * anchor_widths
         anchor_ctr_y   = anchor[:, 1] + 0.5 * anchor_heights
 
+        geo_on = True
+
+        datas_graph = []
+        
         for key, value in batch_map.items():
+            unique_ids_ls = []
+            dict_edge_gen = {}
             for j in range(value):
                 classification = classifications[j, :, :]
                 regression = regressions[j, :, :]
+                features = feats[j, :, :]
+                if geo_on == True:
+                    geos = geos[j].repeat(1,features.shape[0]).view(-1,3)
+                    features = torch.cat((features, geos.float()), 1)
 
                 bbox_annotation = annotations[j, :, :]
                 bbox_annotation = bbox_annotation[bbox_annotation[:, 4] != -1]
@@ -62,9 +76,6 @@ class FocalLoss(nn.Module):
 
                 IoU_max, IoU_argmax = torch.max(IoU, dim=1) # num_anchors x 1
 
-                #import pdb
-                #pdb.set_trace()
-
                 # compute the loss for classification
                 targets = torch.ones(classification.shape) * -1
 
@@ -72,8 +83,10 @@ class FocalLoss(nn.Module):
                     targets = targets.cuda()
 
                 targets[torch.lt(IoU_max, 0.4), :] = 0
-
+                
+                negative_indices = torch.lt(IoU_max, 0.15)
                 positive_indices = torch.ge(IoU_max, 0.5)
+                high_positive_indices = torch.ge(IoU_max, 0.7)
 
                 num_positive_anchors = positive_indices.sum()
 
@@ -106,17 +119,65 @@ class FocalLoss(nn.Module):
                 # compute the loss for regression
 
                 if positive_indices.sum() > 0:
-                    assigned_annotations = assigned_annotations[positive_indices, :]
+                    assigned_annotations_ = assigned_annotations[positive_indices, :]
+                    # get instance ids and append to list
+                    instance_ids = list(assigned_annotations[:,5].unique()[1:].cpu().numpy())
+                    unique_ids_ls += instance_ids
+                    unique_ids_ls = list(set(unique_ids_ls))
+
+                    for inst_id in unique_ids_ls:
+                        # boxes with instances matching inst_id
+                        instance_boxes = torch.eq(assigned_annotations[:,5],inst_id)
+                        # boxes with high IoU instances
+                        if high_positive_indices.sum() == 0:
+                            intersection = positive_indices * instance_boxes
+                        else:
+                            intersection = high_positive_indices * instance_boxes #this
+
+                        if features[intersection].shape[0] == 0:
+                            intersection = torch.ge(IoU_max, 0.5) * instance_boxes
+                        
+                        pos_feats = features[intersection]
+
+                        pos_class_feats = classification[intersection]
+                        pos_regression_feats = regression[intersection]
+
+                        pos_geo_feats = assigned_annotations[intersection][:,8:]
+                        neg_feats = features[~intersection]
+                        neg_class_feats = classification[~intersection]
+                        neg_regression_feats = regression[~intersection]
+                        neg_geo_feats = assigned_annotations[~intersection][:,8:]
+
+                        rand = torch.randperm(neg_feats.shape[0])[:pos_feats.shape[0]]
+
+                        neg_feats = neg_feats[rand,:]
+                        neg_class_feats = neg_class_feats[rand,:]
+                        neg_regression_feats = neg_regression_feats[rand,:]
+                        neg_geo_feats = neg_geo_feats[rand,:]
+
+                        if pos_feats.shape[0] != 0:
+                            if inst_id not in dict_edge_gen:
+                                dict_edge_gen[inst_id] = {}
+
+                            dict_edge_gen[inst_id][j] = {
+                            "pos_feats": pos_feats,
+                            "pos_class_feats": pos_class_feats,
+                            "pos_regression_feats": pos_regression_feats,
+                            "pos_geo_feats": pos_geo_feats,
+                            "neg_feats": neg_feats,
+                            "neg_class_feats": neg_class_feats,
+                            "neg_regression_feats": neg_regression_feats,
+                            "neg_geo_feats": neg_geo_feats}
 
                     anchor_widths_pi = anchor_widths[positive_indices]
                     anchor_heights_pi = anchor_heights[positive_indices]
                     anchor_ctr_x_pi = anchor_ctr_x[positive_indices]
                     anchor_ctr_y_pi = anchor_ctr_y[positive_indices]
 
-                    gt_widths  = assigned_annotations[:, 2] - assigned_annotations[:, 0]
-                    gt_heights = assigned_annotations[:, 3] - assigned_annotations[:, 1]
-                    gt_ctr_x   = assigned_annotations[:, 0] + 0.5 * gt_widths
-                    gt_ctr_y   = assigned_annotations[:, 1] + 0.5 * gt_heights
+                    gt_widths = assigned_annotations_[:, 2] - assigned_annotations_[:, 0]
+                    gt_heights = assigned_annotations_[:, 3] - assigned_annotations_[:, 1]
+                    gt_ctr_x = assigned_annotations_[:, 0] + 0.5 * gt_widths
+                    gt_ctr_y = assigned_annotations_[:, 1] + 0.5 * gt_heights
 
                     # clip widths to 1
                     gt_widths  = torch.clamp(gt_widths, min=1)
@@ -151,6 +212,104 @@ class FocalLoss(nn.Module):
                     else:
                         regression_losses.append(torch.tensor(0).float())
 
-        return torch.stack(classification_losses).mean(dim=0, keepdim=True), torch.stack(regression_losses).mean(dim=0, keepdim=True)
+            all_feats = torch.tensor([]).cuda()
+            all_class_feats = torch.tensor([]).cuda()
+            all_regression_feats = torch.tensor([]).cuda()
+            all_geo_feats = torch.tensor([]).cuda()
+            all_gt = torch.tensor([]).cuda()
+            all_edges_index = torch.tensor([]).cuda().long()
 
-    
+
+            pos_dict = {}
+            for inst_id, value in dict_edge_gen.items():
+                #initialize temp tensors
+                tmp_pos_feats = torch.tensor([]).cuda()
+                tmp_pos_class_feats = torch.tensor([]).cuda()
+                tmp_pos_regression_feats = torch.tensor([]).cuda()
+                tmp_pos_geo_feats = torch.tensor([]).cuda()
+                tmp_neg_feats = torch.tensor([]).cuda()
+                tmp_neg_class_feats = torch.tensor([]).cuda()
+                tmp_neg_regression_feats = torch.tensor([]).cuda()
+                tmp_neg_geo_feats = torch.tensor([]).cuda()
+
+                # for all batches inside instances
+                for batch_id, value_inst in dict_edge_gen[inst_id].items():
+
+                    tmp_pos_feats = torch.cat((tmp_pos_feats, dict_edge_gen[inst_id][batch_id]["pos_feats"]), 0)
+                    tmp_pos_class_feats = torch.cat((tmp_pos_class_feats, dict_edge_gen[inst_id][batch_id]["pos_class_feats"]), 0)
+                    tmp_pos_regression_feats = torch.cat((tmp_pos_regression_feats, dict_edge_gen[inst_id][batch_id]["pos_regression_feats"]), 0)
+                    tmp_pos_geo_feats = torch.cat((tmp_pos_geo_feats, dict_edge_gen[inst_id][batch_id]["pos_geo_feats"]), 0)
+                    tmp_neg_feats = torch.cat((tmp_neg_feats, dict_edge_gen[inst_id][batch_id]["neg_feats"]), 0)
+                    tmp_neg_class_feats = torch.cat((tmp_neg_class_feats, dict_edge_gen[inst_id][batch_id]["neg_class_feats"]), 0)
+                    tmp_neg_regression_feats = torch.cat((tmp_neg_regression_feats, dict_edge_gen[inst_id][batch_id]["neg_regression_feats"]), 0)
+                    tmp_neg_geo_feats = torch.cat((tmp_neg_geo_feats, dict_edge_gen[inst_id][batch_id]["neg_geo_feats"]), 0)
+
+                all_nodes_range_start = all_feats.shape[0]
+                pos_nodes_range_start = tmp_pos_feats.shape[0]
+                neg_nodes_range_start = tmp_neg_feats.shape[0]
+                pos_node = torch.arange(all_nodes_range_start, all_nodes_range_start + pos_nodes_range_start)
+                neg_node = torch.arange(all_nodes_range_start + pos_nodes_range_start, all_nodes_range_start + pos_nodes_range_start + neg_nodes_range_start)
+
+                pos_dict[inst_id] = pos_node
+
+                # create combination of positive nodes of all anchors inside the instance
+                edges_pos_nat = torch.combinations(pos_node, 2)
+
+                # create the opposite edge/relationship            
+                edges_pos_rev = torch.stack((edges_pos_nat[:,1],edges_pos_nat[:,0]),1)
+                edge_pos_ = torch.cat((edges_pos_nat,edges_pos_rev),0)
+
+                # create gt for pos
+                y_pos = torch.ones(edge_pos_.shape[0]).cuda()
+
+                numpy_pos_node = pos_node.detach().cpu().numpy()
+                numpy_neg_node = neg_node.detach().cpu().numpy()
+                edges_neg_pos_combo = torch.tensor(np.array(list(product(numpy_pos_node,numpy_neg_node))))
+                
+                edges_neg_pos_combo_rev = torch.stack((edges_neg_pos_combo[:,1],edges_neg_pos_combo[:,0]),1)
+                edge_neg_pos_ = torch.cat((edges_neg_pos_combo,edges_neg_pos_combo_rev),0)
+
+                y_neg = torch.zeros(edge_neg_pos_.shape[0]).cuda()
+
+                feats_pos_neg = torch.cat((tmp_pos_feats, tmp_neg_feats), 0)    
+                class_feats = torch.cat((tmp_pos_class_feats, tmp_neg_class_feats), 0)
+                regression_feats = torch.cat((tmp_pos_regression_feats, tmp_neg_regression_feats), 0)
+                geo_feats = torch.cat((tmp_pos_geo_feats, tmp_neg_geo_feats), 0)
+                inst_edges = torch.cat((edge_pos_, edge_neg_pos_), 0).cuda().long()
+
+                y_ = torch.cat((y_pos, y_neg), 0).cuda()
+                
+                all_edges_index = torch.cat((all_edges_index, inst_edges), 0).cuda().long()
+                all_feats = torch.cat((all_feats, feats_pos_neg), 0).cuda()
+                all_geo_feats = torch.cat((all_geo_feats, geo_feats), 0).cuda()
+                all_regression_feats = torch.cat((all_regression_feats, regression_feats), 0).cuda()
+                all_gt = torch.cat((all_gt, y_), 0)
+
+            pos_comb = combinations(pos_dict.items(), 2)
+            for comb in list(pos_comb):
+                pos1 = comb[0][1].detach().cpu().numpy()
+                pos2 = comb[1][1].detach().cpu().numpy()
+                edges_pos_pos_neg_combo = torch.tensor(np.array(list(product(pos1,pos2))))
+                edges_pos_pos_neg_combo_rev = torch.stack((edges_pos_pos_neg_combo[:,1],edges_pos_pos_neg_combo[:,0]),1)
+                edge_neg_neg_ = torch.cat((edges_pos_pos_neg_combo,edges_pos_pos_neg_combo_rev),0)
+                y_neg = torch.zeros(edge_neg_neg_.shape[0]).cuda()
+                all_edges_index = torch.cat((all_edges_index, edge_neg_neg_.cuda().long()), 0)
+                all_gt = torch.cat((all_gt, y_neg), 0)
+
+            try:
+                # Debug me
+                all_edges_index = all_edges_index.view(all_edges_index.shape[1], all_edges_index.shape[0])
+            except IndexError as error:
+                print("Index error HAPPENING with no reason")
+
+            data_ = Data(classification = all_class_feats,
+                regressions = all_regression_feats,
+                geos= all_geo_feats,
+                x = all_feats.float(),
+                edge_index = all_edges_index,
+                y = all_gt.cuda().double()
+            )
+            # print(data_)
+            datas_graph.append(data_)
+
+        return torch.stack(classification_losses).mean(dim=0, keepdim=True), torch.stack(regression_losses).mean(dim=0, keepdim=True), datas_graph
