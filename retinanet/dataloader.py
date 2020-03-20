@@ -226,7 +226,7 @@ class VOCDetection(data.Dataset):
             if self.name == "Pasadena":
                 target = ET.parse(self._annopath % (self.rootpath, img_ids[i]+"_z2")).getroot()
                 img = cv2.imread(self._imgpath % (self.rootpath, img_ids[i]+"_z2"))
-                geo = pickle.load(open(osp.join(self.rootpath,"GeoFeats",img_ids[i]+".p"), "rb" )) 
+                geo = pickle.load(open(osp.join(self.rootpath,"GeoFeats",img_ids[i]+".p"), "rb" ))
 
             else:
                 target = ET.parse(self._annopath % (self.rootpath, img_ids[i])).getroot()

@@ -6,6 +6,7 @@ from itertools import product
 import sys
 import torch.nn.functional as F
 from itertools import combinations
+import pickle
 
 def calc_iou(a, b):
     area = (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
@@ -54,8 +55,9 @@ class FocalLoss(nn.Module):
                 regression = regressions[j, :, :]
                 features = feats[j, :, :]
                 if geo_on == True:
-                    geos = geos[j].repeat(1,features.shape[0]).view(-1,3)
-                    features = torch.cat((features, geos.float()), 1)
+                    geo = geos[j]
+                    # geo = geos[j].repeat(1,features.shape[0]).view(-1,3)
+                    # features = torch.cat((features, geo.float()), 1)
 
                 bbox_annotation = annotations[j, :, :]
                 bbox_annotation = bbox_annotation[bbox_annotation[:, 4] != -1]
@@ -163,11 +165,7 @@ class FocalLoss(nn.Module):
                             "pos_feats": pos_feats,
                             "pos_class_feats": pos_class_feats,
                             "pos_regression_feats": pos_regression_feats,
-                            "pos_geo_feats": pos_geo_feats,
-                            "neg_feats": neg_feats,
-                            "neg_class_feats": neg_class_feats,
-                            "neg_regression_feats": neg_regression_feats,
-                            "neg_geo_feats": neg_geo_feats}
+                            "pos_geo_feats": geo.repeat(1,pos_feats.shape[0]).view(-1,3).float()}
 
                     anchor_widths_pi = anchor_widths[positive_indices]
                     anchor_heights_pi = anchor_heights[positive_indices]
@@ -317,5 +315,6 @@ class FocalLoss(nn.Module):
                 y = all_gt.cuda().double()
             )
             datas_graph.append(data_)
-
+            with open('data.p', 'wb') as handle:
+                pickle.dump(data_, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return torch.stack(classification_losses).mean(dim=0, keepdim=True), torch.stack(regression_losses).mean(dim=0, keepdim=True), datas_graph
