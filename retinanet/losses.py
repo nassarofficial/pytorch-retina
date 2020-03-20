@@ -227,10 +227,10 @@ class FocalLoss(nn.Module):
                 tmp_pos_class_feats = torch.tensor([]).cuda()
                 tmp_pos_regression_feats = torch.tensor([]).cuda()
                 tmp_pos_geo_feats = torch.tensor([]).cuda()
-                tmp_neg_feats = torch.tensor([]).cuda()
-                tmp_neg_class_feats = torch.tensor([]).cuda()
-                tmp_neg_regression_feats = torch.tensor([]).cuda()
-                tmp_neg_geo_feats = torch.tensor([]).cuda()
+                # tmp_neg_feats = torch.tensor([]).cuda()
+                # tmp_neg_class_feats = torch.tensor([]).cuda()
+                # tmp_neg_regression_feats = torch.tensor([]).cuda()
+                # tmp_neg_geo_feats = torch.tensor([]).cuda()
 
                 # for all batches inside instances
                 for batch_id, value_inst in dict_edge_gen[inst_id].items():
@@ -239,16 +239,16 @@ class FocalLoss(nn.Module):
                     tmp_pos_class_feats = torch.cat((tmp_pos_class_feats, dict_edge_gen[inst_id][batch_id]["pos_class_feats"]), 0)
                     tmp_pos_regression_feats = torch.cat((tmp_pos_regression_feats, dict_edge_gen[inst_id][batch_id]["pos_regression_feats"]), 0)
                     tmp_pos_geo_feats = torch.cat((tmp_pos_geo_feats, dict_edge_gen[inst_id][batch_id]["pos_geo_feats"]), 0)
-                    tmp_neg_feats = torch.cat((tmp_neg_feats, dict_edge_gen[inst_id][batch_id]["neg_feats"]), 0)
-                    tmp_neg_class_feats = torch.cat((tmp_neg_class_feats, dict_edge_gen[inst_id][batch_id]["neg_class_feats"]), 0)
-                    tmp_neg_regression_feats = torch.cat((tmp_neg_regression_feats, dict_edge_gen[inst_id][batch_id]["neg_regression_feats"]), 0)
-                    tmp_neg_geo_feats = torch.cat((tmp_neg_geo_feats, dict_edge_gen[inst_id][batch_id]["neg_geo_feats"]), 0)
+                    # tmp_neg_feats = torch.cat((tmp_neg_feats, dict_edge_gen[inst_id][batch_id]["neg_feats"]), 0)
+                    # tmp_neg_class_feats = torch.cat((tmp_neg_class_feats, dict_edge_gen[inst_id][batch_id]["neg_class_feats"]), 0)
+                    # tmp_neg_regression_feats = torch.cat((tmp_neg_regression_feats, dict_edge_gen[inst_id][batch_id]["neg_regression_feats"]), 0)
+                    # tmp_neg_geo_feats = torch.cat((tmp_neg_geo_feats, dict_edge_gen[inst_id][batch_id]["neg_geo_feats"]), 0)
 
                 all_nodes_range_start = all_feats.shape[0]
                 pos_nodes_range_start = tmp_pos_feats.shape[0]
-                neg_nodes_range_start = tmp_neg_feats.shape[0]
+                # neg_nodes_range_start = tmp_neg_feats.shape[0]
                 pos_node = torch.arange(all_nodes_range_start, all_nodes_range_start + pos_nodes_range_start)
-                neg_node = torch.arange(all_nodes_range_start + pos_nodes_range_start, all_nodes_range_start + pos_nodes_range_start + neg_nodes_range_start)
+                # neg_node = torch.arange(all_nodes_range_start + pos_nodes_range_start, all_nodes_range_start + pos_nodes_range_start + neg_nodes_range_start)
 
                 pos_dict[inst_id] = pos_node
 
@@ -262,39 +262,46 @@ class FocalLoss(nn.Module):
                 # create gt for pos
                 y_pos = torch.ones(edge_pos_.shape[0]).cuda()
 
-                numpy_pos_node = pos_node.detach().cpu().numpy()
-                numpy_neg_node = neg_node.detach().cpu().numpy()
-                edges_neg_pos_combo = torch.tensor(np.array(list(product(numpy_pos_node,numpy_neg_node))))
+                # numpy_pos_node = pos_node.detach().cpu().numpy()
+                # numpy_neg_node = neg_node.detach().cpu().numpy()
+                # edges_neg_pos_combo = torch.tensor(np.array(list(product(numpy_pos_node,numpy_neg_node))))
                 
-                edges_neg_pos_combo_rev = torch.stack((edges_neg_pos_combo[:,1],edges_neg_pos_combo[:,0]),1)
-                edge_neg_pos_ = torch.cat((edges_neg_pos_combo,edges_neg_pos_combo_rev),0)
+                # edges_neg_pos_combo_rev = torch.stack((edges_neg_pos_combo[:,1],edges_neg_pos_combo[:,0]),1)
+                # edge_neg_pos_ = torch.cat((edges_neg_pos_combo,edges_neg_pos_combo_rev),0)
 
-                y_neg = torch.zeros(edge_neg_pos_.shape[0]).cuda()
+                # y_neg = torch.zeros(edge_neg_pos_.shape[0]).cuda()
+                # feats_pos_neg = torch.cat((tmp_pos_feats, tmp_neg_feats), 0)
 
-                feats_pos_neg = torch.cat((tmp_pos_feats, tmp_neg_feats), 0)    
-                class_feats = torch.cat((tmp_pos_class_feats, tmp_neg_class_feats), 0)
-                regression_feats = torch.cat((tmp_pos_regression_feats, tmp_neg_regression_feats), 0)
-                geo_feats = torch.cat((tmp_pos_geo_feats, tmp_neg_geo_feats), 0)
-                inst_edges = torch.cat((edge_pos_, edge_neg_pos_), 0).cuda().long()
+                # class_feats = torch.cat((tmp_pos_class_feats, tmp_neg_class_feats), 0)
+                # regression_feats = torch.cat((tmp_pos_regression_feats, tmp_neg_regression_feats), 0)
+                # geo_feats = torch.cat((tmp_pos_geo_feats, tmp_neg_geo_feats), 0)
+                # inst_edges = torch.cat((edge_pos_, edge_neg_pos_), 0).cuda().long()
 
-                y_ = torch.cat((y_pos, y_neg), 0).cuda()
-                
-                all_edges_index = torch.cat((all_edges_index, inst_edges), 0).cuda().long()
-                all_feats = torch.cat((all_feats, feats_pos_neg), 0).cuda()
-                all_geo_feats = torch.cat((all_geo_feats, geo_feats), 0).cuda()
-                all_regression_feats = torch.cat((all_regression_feats, regression_feats), 0).cuda()
-                all_gt = torch.cat((all_gt, y_), 0)
+                # y_ = torch.cat((y_pos, y_neg), 0).cuda(   )
+                all_class_feats = torch.cat((all_class_feats, tmp_pos_class_feats.cuda()), 0).cuda()
+                all_edges_index = torch.cat((all_edges_index, edge_pos_.cuda()), 0).cuda().long()
+                all_feats = torch.cat((all_feats, tmp_pos_feats), 0).cuda()
+                all_geo_feats = torch.cat((all_geo_feats, tmp_pos_geo_feats), 0).cuda()
+                all_regression_feats = torch.cat((all_regression_feats, tmp_pos_regression_feats), 0).cuda()
+                all_gt = torch.cat((all_gt, y_pos), 0)
 
-            pos_comb = combinations(pos_dict.items(), 2)
-            for comb in list(pos_comb):
-                pos1 = comb[0][1].detach().cpu().numpy()
-                pos2 = comb[1][1].detach().cpu().numpy()
-                edges_pos_pos_neg_combo = torch.tensor(np.array(list(product(pos1,pos2))))
-                edges_pos_pos_neg_combo_rev = torch.stack((edges_pos_pos_neg_combo[:,1],edges_pos_pos_neg_combo[:,0]),1)
-                edge_neg_neg_ = torch.cat((edges_pos_pos_neg_combo,edges_pos_pos_neg_combo_rev),0)
-                y_neg = torch.zeros(edge_neg_neg_.shape[0]).cuda()
-                all_edges_index = torch.cat((all_edges_index, edge_neg_neg_.cuda().long()), 0)
-                all_gt = torch.cat((all_gt, y_neg), 0)
+                # all_edges_index = torch.cat((all_edges_index, inst_edges), 0).cuda().long()
+                # all_feats = torch.cat((all_feats, feats_pos_neg), 0).cuda()
+                # all_geo_feats = torch.cat((all_geo_feats, tmp_pos_geo_feats), 0).cuda()
+                # all_regression_feats = torch.cat((all_regression_feats, regression_feats), 0).cuda()
+                # all_gt = torch.cat((all_gt, y_), 0)
+
+            if len(pos_dict.keys()) > 1:
+                pos_comb = combinations(pos_dict.items(), 2)
+                for comb in list(pos_comb):
+                    pos1 = comb[0][1].detach().cpu().numpy()
+                    pos2 = comb[1][1].detach().cpu().numpy()
+                    edges_pos_pos_neg_combo = torch.tensor(np.array(list(product(pos1,pos2))))
+                    edges_pos_pos_neg_combo_rev = torch.stack((edges_pos_pos_neg_combo[:,1],edges_pos_pos_neg_combo[:,0]),1)
+                    edge_neg_neg_ = torch.cat((edges_pos_pos_neg_combo,edges_pos_pos_neg_combo_rev),0)
+                    y_neg = torch.zeros(edge_neg_neg_.shape[0]).cuda()
+                    all_edges_index = torch.cat((all_edges_index, edge_neg_neg_.cuda().long()), 0)
+                    all_gt = torch.cat((all_gt, y_neg), 0)
 
             try:
                 # Debug me
@@ -309,7 +316,6 @@ class FocalLoss(nn.Module):
                 edge_index = all_edges_index,
                 y = all_gt.cuda().double()
             )
-            # print(data_)
             datas_graph.append(data_)
 
         return torch.stack(classification_losses).mean(dim=0, keepdim=True), torch.stack(regression_losses).mean(dim=0, keepdim=True), datas_graph

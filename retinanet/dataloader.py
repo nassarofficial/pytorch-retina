@@ -171,7 +171,7 @@ class VOCDetection(data.Dataset):
         if overfit == 1:
             dataset_dir = 'Main_Overfit'
 
-        self.ids_full = pickle.load( open( osp.join(self.rootpath, 'ImageSets', 'Main', self.image_set + '.p'), "rb" ) )
+        self.ids_full = pickle.load( open( osp.join(self.rootpath, 'ImageSets', dataset_dir, self.image_set + '.p'), "rb" ) )
         # self.ids_full = []
         # sub_ids = []
         # for line in open(osp.join(self.rootpath, 'ImageSets', 'Main', self.image_set + '.txt')):

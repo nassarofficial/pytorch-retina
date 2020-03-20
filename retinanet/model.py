@@ -363,7 +363,7 @@ class ResNet(nn.Module):
             for data in graph_data:
                 x, geo, reg, edge_index, edge_y = data.x, data.geos, data.regressions, data.edge_index, data.y
 
-                GeoGraphModel = GeoGraph(64, True, True).cuda()
+                GeoGraphModel = GeoGraph(32, True, True).cuda()
                 edge_scores = GeoGraphModel(data)
                 graph_loss.append(criterion(edge_scores, edge_y.view(-1).float()))
             graph_loss = torch.mean(torch.stack(graph_loss))

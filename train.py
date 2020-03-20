@@ -53,7 +53,7 @@ def main(args=None):
     # sampler = AspectRatioBasedSampler(train_dataset, batch_size=2, drop_last=False)
 
     training_params = {"batch_size": opt.batch_size,
-                   "shuffle": False,
+                   "shuffle": True,
                    "drop_last": True,
                    "collate_fn": collater,
                    "num_workers": 4}
@@ -199,11 +199,10 @@ def main(args=None):
             cls_loss = np.mean(loss_classification_ls)
             reg_loss = np.mean(loss_regression_ls)
             gph_loss = np.mean(loss_graph_ls)
-            print(gph_loss)
             loss = cls_loss + reg_loss + gph_loss
 
             print(
-                'Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Graph loss: {:1.5f}. Total loss: {:1.5f}'.format(epoch + 1, opt.num_epochs, cls_loss, reg_loss, gph_loss, np.mean(loss)))
+                '- Val Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. * Graph loss: {:1.5f}. Total loss: {:1.5f}'.format(epoch + 1, opt.num_epochs, cls_loss, reg_loss, gph_loss, np.mean(loss)))
             writer.add_scalar('Test/Total_loss', loss, epoch)
             writer.add_scalar('Test/Regression_loss', reg_loss, epoch)
             writer.add_scalar('Test/Graph_loss (graph loss)', gph_loss, epoch)
