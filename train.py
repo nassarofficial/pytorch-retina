@@ -53,7 +53,7 @@ def main(args=None):
     # sampler = AspectRatioBasedSampler(train_dataset, batch_size=2, drop_last=False)
 
     training_params = {"batch_size": opt.batch_size,
-                   "shuffle": True,
+                   "shuffle": False,
                    "drop_last": True,
                    "collate_fn": collater,
                    "num_workers": 4}

@@ -46,7 +46,7 @@ class FocalLoss(nn.Module):
         geo_on = True
 
         datas_graph = []
-        
+        flagger = 0
         for key, value in batch_map.items():
             unique_ids_ls = []
             dict_edge_gen = {}
@@ -247,12 +247,13 @@ class FocalLoss(nn.Module):
                 # neg_nodes_range_start = tmp_neg_feats.shape[0]
                 pos_node = torch.arange(all_nodes_range_start, all_nodes_range_start + pos_nodes_range_start)
                 # neg_node = torch.arange(all_nodes_range_start + pos_nodes_range_start, all_nodes_range_start + pos_nodes_range_start + neg_nodes_range_start)
-
+                # print(pos_node)
                 pos_dict[inst_id] = pos_node
 
                 # create combination of positive nodes of all anchors inside the instance
                 edges_pos_nat = torch.combinations(pos_node, 2)
-
+                # print(edges_pos_nat)
+                # print("------------------------------------")
                 # create the opposite edge/relationship            
                 edges_pos_rev = torch.stack((edges_pos_nat[:,1],edges_pos_nat[:,0]),1)
                 edge_pos_ = torch.cat((edges_pos_nat,edges_pos_rev),0)
@@ -290,6 +291,7 @@ class FocalLoss(nn.Module):
                 # all_gt = torch.cat((all_gt, y_), 0)
 
             if len(pos_dict.keys()) > 1:
+                
                 pos_comb = combinations(pos_dict.items(), 2)
                 for comb in list(pos_comb):
                     pos1 = comb[0][1].detach().cpu().numpy()
@@ -315,6 +317,7 @@ class FocalLoss(nn.Module):
                 y = all_gt.cuda().double()
             )
             datas_graph.append(data_)
-            with open('data.p', 'wb') as handle:
-                pickle.dump(data_, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            if flagger == 1:
+                with open('data.p', 'wb') as handle:
+                    pickle.dump(data_, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return torch.stack(classification_losses).mean(dim=0, keepdim=True), torch.stack(regression_losses).mean(dim=0, keepdim=True), datas_graph

@@ -52,7 +52,7 @@ class EdgePoolingMod(torch.nn.Module):
         ["edge_index", "cluster", "batch", "new_edge_score"])
 
     def __init__(self, in_channels, edge_score_method=None, dropout=0.2,
-                 add_to_edge_score=0.0):
+                 add_to_edge_score=0.5):
         super(EdgePoolingMod, self).__init__()
         self.in_channels = in_channels
         if edge_score_method is None:
